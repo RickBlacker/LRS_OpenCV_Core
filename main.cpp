@@ -20,28 +20,13 @@
 //
 /////////////////////////////////////////////////////////////////////////////
 
-
-#include <vector>
 #include <librealsense/rs.hpp>
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui.hpp>
 
 using namespace std;
+using namespace rs;
 
-
-/////////////////////////////////////////////////////////////////////////////
-// Contains basic information needed to display rgb and depth data to a
-// window.
-/////////////////////////////////////////////////////////////////////////////
-struct state
-{
-	std::vector<rs::stream> tex_streams;
-	float depth_scale;
-	rs::extrinsics extrin;
-	rs::intrinsics depth_intrin;
-	rs::intrinsics color_intrin;
-	int index;
-};
 
 
 // Window size and frame rate
@@ -49,96 +34,36 @@ int const INPUT_WIDTH 	= 320;
 int const INPUT_HEIGHT 	= 240;
 int const FRAMERATE 	= 60;
 
-// Indexes into the state.tex_streams vector
-int const STREAM_COLOR	= 0;
-int const STREAM_DEPTH	= 1;
-int const STREAM_IR		= 2;
-
 // Named windows
 char* const WINDOW_DEPTH = "Depth Image";
 char* const WINDOW_RGB	 = "RGB Image";
 
 
-static rs::context 	_ctx;
-static state 		_app_state;
-bool 				_loop = true;
+context 	_rs_ctx;
+device& 	_rs_camera = *_rs_ctx.get_device( 0 );
+intrinsics 	_depth_intrin;
+intrinsics  _color_intrin;
+bool 		_loop = true;
 
-rs::device& 		_rs_camera = *_ctx.get_device( 0 );
 
 
 // Initialize the application state. Upon success will return the static app_state vars address
-state *initialize_app_state( )
+bool initialize_streaming( )
 {
-	if( _ctx.get_device_count( ) > 0 )
+	bool success = false;
+	if( _rs_ctx.get_device_count( ) > 0 )
 	{
 		_rs_camera.enable_stream( rs::stream::color, INPUT_WIDTH, INPUT_HEIGHT, rs::format::rgb8, FRAMERATE );
 		_rs_camera.enable_stream( rs::stream::depth, INPUT_WIDTH, INPUT_HEIGHT, rs::format::z16, FRAMERATE );
 		_rs_camera.start( );
 
-		state initState;
-
-		initState.tex_streams	= { rs::stream::color, rs::stream::depth, rs::stream::infrared };
-		initState.depth_scale	= _rs_camera.get_depth_scale( );
-		initState.extrin		= _rs_camera.get_extrinsics( rs::stream::depth, rs::stream::color );
-		initState.depth_intrin	= _rs_camera.get_stream_intrinsics( rs::stream::depth );
-		initState.color_intrin	= _rs_camera.get_stream_intrinsics( rs::stream::color );
-		initState.index			= STREAM_COLOR;
-
-		_app_state = initState;
-
-		return &_app_state;
+		success = true;
 	}
-	return 0;
-}
-
-/////////////////////////////////////////////////////////////////////////////
-// Gets the next frames camera data and puts it into the app_state struct.
-/////////////////////////////////////////////////////////////////////////////
-void get_next_frame( )
-{
-
-	const rs::stream tex_stream = _app_state.tex_streams[ _app_state.index ];
-
-	_app_state.depth_scale 		= _rs_camera.get_depth_scale( );
-	_app_state.extrin 			= _rs_camera.get_extrinsics( rs::stream::depth, tex_stream );
-	_app_state.depth_intrin 	= _rs_camera.get_stream_intrinsics( rs::stream::depth );
-	_app_state.color_intrin 	= _rs_camera.get_stream_intrinsics( rs::stream::color );
+	return success;
 }
 
 
 
-/////////////////////////////////////////////////////////////////////////////
-// Called every frame gets the data from streams and displays them using OpenCV.
-/////////////////////////////////////////////////////////////////////////////
-bool display_next_frame( )
-{
-
-	// Create depth image
-	cv::Mat depth16( _app_state.depth_intrin.height,
-					 _app_state.depth_intrin.width,
-					 CV_16U,
-					 (uchar *)_rs_camera.get_frame_data( rs::stream::depth ) );
-
-	// Create color image
-	cv::Mat rgb( _app_state.color_intrin.height,
-				 _app_state.color_intrin.width,
-				 CV_8UC3,
-				 (uchar *)_rs_camera.get_frame_data( rs::stream::color ) );
-
-	// < 800
-	cv::Mat depth8u = depth16;
-
-
-	depth8u.convertTo( depth8u, CV_8UC1, 255.0/1000 );
-	imshow( WINDOW_DEPTH, depth8u );
-	cvWaitKey( 1 );
-
-	cv::cvtColor( rgb, rgb, cv::COLOR_BGR2RGB );
-	imshow( WINDOW_RGB, rgb );
-	cvWaitKey( 1 );
-
-	return true;
-}
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -168,6 +93,43 @@ void setup_windows( )
 }
 
 
+
+/////////////////////////////////////////////////////////////////////////////
+// Called every frame gets the data from streams and displays them using OpenCV.
+/////////////////////////////////////////////////////////////////////////////
+bool display_next_frame( )
+{
+
+	_depth_intrin 	= _rs_camera.get_stream_intrinsics( rs::stream::depth );
+	_color_intrin 	= _rs_camera.get_stream_intrinsics( rs::stream::color );
+
+
+	// Create depth image
+	cv::Mat depth16( _depth_intrin.height,
+					 _depth_intrin.width,
+					 CV_16U,
+					 (uchar *)_rs_camera.get_frame_data( rs::stream::depth ) );
+
+	// Create color image
+	cv::Mat rgb( _color_intrin.height,
+				 _color_intrin.width,
+				 CV_8UC3,
+				 (uchar *)_rs_camera.get_frame_data( rs::stream::color ) );
+
+	// < 800
+	cv::Mat depth8u = depth16;
+	depth8u.convertTo( depth8u, CV_8UC1, 255.0/1000 );
+
+	imshow( WINDOW_DEPTH, depth8u );
+	cvWaitKey( 1 );
+
+	cv::cvtColor( rgb, rgb, cv::COLOR_BGR2RGB );
+	imshow( WINDOW_RGB, rgb );
+	cvWaitKey( 1 );
+
+	return true;
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // Main function
 /////////////////////////////////////////////////////////////////////////////
@@ -175,16 +137,14 @@ int main( ) try
 {
 	rs::log_to_console( rs::log_severity::warn );
 
-	state *app_state = initialize_app_state( );
-	setup_windows( );
-
-	if( app_state == 0)
+	if( !initialize_streaming( ) )
 	{
 		std::cout << "Unable to locate a camera" << std::endl;
 		rs::log_to_console( rs::log_severity::fatal );
 		return EXIT_FAILURE;
 	}
 
+	setup_windows( );
 
 	// Loop until someone left clicks on either of the images in either window.
 	while( _loop )
@@ -192,9 +152,10 @@ int main( ) try
 		if( _rs_camera.is_streaming( ) )
 			_rs_camera.wait_for_frames( );
 
-		get_next_frame( );
 		display_next_frame( );
 	}
+
+
 
 	_rs_camera.stop( );
 	cv::destroyAllWindows( );
