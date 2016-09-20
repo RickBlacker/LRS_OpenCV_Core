@@ -28,7 +28,6 @@ using namespace std;
 using namespace rs;
 
 
-
 // Window size and frame rate
 int const INPUT_WIDTH 	= 320;
 int const INPUT_HEIGHT 	= 240;
@@ -40,7 +39,8 @@ char* const WINDOW_RGB	 = "RGB Image";
 
 
 context 	_rs_ctx;
-device& 	_rs_camera = *_rs_ctx.get_device( 0 );
+//device& 	_rs_camera = *_rs_ctx.get_device( 0 );
+device* 	_rs_camera = NULL;
 intrinsics 	_depth_intrin;
 intrinsics  _color_intrin;
 bool 		_loop = true;
@@ -53,16 +53,17 @@ bool initialize_streaming( )
 	bool success = false;
 	if( _rs_ctx.get_device_count( ) > 0 )
 	{
-		_rs_camera.enable_stream( rs::stream::color, INPUT_WIDTH, INPUT_HEIGHT, rs::format::rgb8, FRAMERATE );
-		_rs_camera.enable_stream( rs::stream::depth, INPUT_WIDTH, INPUT_HEIGHT, rs::format::z16, FRAMERATE );
-		_rs_camera.start( );
+		_rs_camera = _rs_ctx.get_device( 0 );
+
+		_rs_camera->enable_stream( rs::stream::color, INPUT_WIDTH, INPUT_HEIGHT, rs::format::rgb8, FRAMERATE );
+		_rs_camera->enable_stream( rs::stream::depth, INPUT_WIDTH, INPUT_HEIGHT, rs::format::z16, FRAMERATE );
+
+		_rs_camera->start( );
 
 		success = true;
 	}
 	return success;
 }
-
-
 
 
 
@@ -76,6 +77,7 @@ static void onMouse( int event, int x, int y, int, void* window_name )
 		_loop = false;
 	}
 }
+
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -99,22 +101,21 @@ void setup_windows( )
 /////////////////////////////////////////////////////////////////////////////
 bool display_next_frame( )
 {
-
-	_depth_intrin 	= _rs_camera.get_stream_intrinsics( rs::stream::depth );
-	_color_intrin 	= _rs_camera.get_stream_intrinsics( rs::stream::color );
-
+	// Get current frames intrinsic data.
+	_depth_intrin 	= _rs_camera->get_stream_intrinsics( rs::stream::depth );
+	_color_intrin 	= _rs_camera->get_stream_intrinsics( rs::stream::color );
 
 	// Create depth image
 	cv::Mat depth16( _depth_intrin.height,
 					 _depth_intrin.width,
 					 CV_16U,
-					 (uchar *)_rs_camera.get_frame_data( rs::stream::depth ) );
+					 (uchar *)_rs_camera->get_frame_data( rs::stream::depth ) );
 
 	// Create color image
 	cv::Mat rgb( _color_intrin.height,
 				 _color_intrin.width,
 				 CV_8UC3,
-				 (uchar *)_rs_camera.get_frame_data( rs::stream::color ) );
+				 (uchar *)_rs_camera->get_frame_data( rs::stream::color ) );
 
 	// < 800
 	cv::Mat depth8u = depth16;
@@ -129,6 +130,8 @@ bool display_next_frame( )
 
 	return true;
 }
+
+
 
 /////////////////////////////////////////////////////////////////////////////
 // Main function
@@ -149,20 +152,16 @@ int main( ) try
 	// Loop until someone left clicks on either of the images in either window.
 	while( _loop )
 	{
-		if( _rs_camera.is_streaming( ) )
-			_rs_camera.wait_for_frames( );
+		if( _rs_camera->is_streaming( ) )
+			_rs_camera->wait_for_frames( );
 
 		display_next_frame( );
 	}
 
-
-
-	_rs_camera.stop( );
+	_rs_camera->stop( );
 	cv::destroyAllWindows( );
 
-
 	return EXIT_SUCCESS;
-
 }
 catch( const rs::error & e )
 {
