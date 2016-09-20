@@ -1,17 +1,18 @@
 // License: Apache 2.0. See LICENSE file in root directory.
 // Copyright(c) 2016 Intel Corporation. All Rights Reserved.
 #include <vector>
-#include <sstream>
-#include <iostream>
-#include <algorithm>
-
 #include <librealsense/rs.hpp>
 #include <opencv2/opencv.hpp>
+#include <opencv2/highgui.hpp>
 
+using namespace std;
+
+
+/////////////////////////////////////////////////////////////////////////////
+// Contains basic information needed to display rgb and depth data to a window.
+/////////////////////////////////////////////////////////////////////////////
 struct state
 {
-	double yaw, pitch, lastX, lastY;
-	bool ml;
 	std::vector<rs::stream> tex_streams;
 	float depth_scale;
 	rs::extrinsics extrin;
@@ -19,121 +20,168 @@ struct state
 	rs::intrinsics tex_intrin;
 	bool identical;
 	int index;
-	rs::device * dev;
 };
 
-int INPUT_WIDTH 	= 320;
-int INPUT_HEIGHT 	= 240;
-int FRAMERATE 		= 60;
+
+// Window size and frame rate
+int const INPUT_WIDTH 	= 320;
+int const INPUT_HEIGHT 	= 240;
+int const FRAMERATE 	= 60;
+
+// Indexes into the state.tex_streams vector
+int const STREAM_COLOR	= 0;
+int const STREAM_DEPTH	= 1;
+int const STREAM_IR		= 2;
+
+// Named windows
+char* const WINDOW_DEPTH = "Depth Image";
+char* const WINDOW_RGB	 = "RGB Image";
 
 
-static rs::context ctx;
-static state app_state;
+
+static rs::context 	_ctx;
+static state 		_app_state;
+bool 				_loop = true;
+
+rs::device& 		_rs_camera = *_ctx.get_device( 0 );
+rs::intrinsics 		_color_intrin;
 
 
-
+// Initialize the application state. Upon success will return the static app_state vars address
 state *initialize_app_state( )
 {
-	if( ctx.get_device_count( ) > 0 )
+	if( _ctx.get_device_count( ) > 0 )
 	{
-		static rs::device & dev = *ctx.get_device( 0 );
-
-
-		dev.enable_stream( rs::stream::color, INPUT_WIDTH, INPUT_HEIGHT, rs::format::rgb8, FRAMERATE );
-		dev.enable_stream( rs::stream::depth, INPUT_WIDTH, INPUT_HEIGHT, rs::format::z16, FRAMERATE );
-		dev.start( );
+		_rs_camera.enable_stream( rs::stream::color, INPUT_WIDTH, INPUT_HEIGHT, rs::format::rgb8, FRAMERATE );
+		_rs_camera.enable_stream( rs::stream::depth, INPUT_WIDTH, INPUT_HEIGHT, rs::format::z16, FRAMERATE );
+		_rs_camera.start( );
 
 		state initState;
-		initState.yaw 			= 0;
-		initState.pitch 		= 0;
-		initState.lastX 		= 0;
-		initState.lastY			= 0;
-		initState.ml			= false;
+
 		initState.tex_streams	= { rs::stream::color, rs::stream::depth, rs::stream::infrared };
-		initState.depth_scale	= dev.get_depth_scale( );
-		initState.extrin		= dev.get_extrinsics( rs::stream::depth, rs::stream::color );
-		initState.depth_intrin	= dev.get_stream_intrinsics( rs::stream::depth );
-		initState.tex_intrin	= dev.get_stream_intrinsics( rs::stream::depth );
+		initState.depth_scale	= _rs_camera.get_depth_scale( );
+		initState.extrin		= _rs_camera.get_extrinsics( rs::stream::depth, rs::stream::color );
+		initState.depth_intrin	= _rs_camera.get_stream_intrinsics( rs::stream::depth );
+		initState.tex_intrin	= _rs_camera.get_stream_intrinsics( rs::stream::depth );
 		initState.identical		= false;
-		initState.index			= 0;
-		initState.dev			= &dev;
-/*
-		state initState =
-			{
-				0, 0, 0, 0,
-				false,
-				{
-					rs::stream::color, rs::stream::depth, rs::stream::infrared }, dev.get_depth_scale(),
+		initState.index			= STREAM_COLOR;
 
+		_app_state = initState;
 
-			dev.get_extrinsics(rs::stream::depth, rs::stream::color), dev.get_stream_intrinsics(rs::stream::depth),
-			dev.get_stream_intrinsics(rs::stream::depth), 0, 0, &dev };
-*/
-		app_state = initState;
-
-		return &app_state;
+		return &_app_state;
 	}
 	return 0;
 }
 
-
-
-bool app_next_frame( ) //(int &xInOut, int &yInOut, int &zInOut)
+/////////////////////////////////////////////////////////////////////////////
+// Gets the next frames camera data and puts it into the app_state struct.
+/////////////////////////////////////////////////////////////////////////////
+void get_next_frame( )
 {
-	rs::device & dev = *app_state.dev;
 
-	if( dev.is_streaming( ) )
-		dev.wait_for_frames( );
+	const rs::stream tex_stream = _app_state.tex_streams[ _app_state.index ];
 
-	const rs::stream tex_stream = app_state.tex_streams[ app_state.index ];
-	app_state.depth_scale 		= dev.get_depth_scale( );
-	app_state.extrin 			= dev.get_extrinsics( rs::stream::depth, tex_stream );
-	app_state.depth_intrin 		= dev.get_stream_intrinsics( rs::stream::depth );
-	app_state.tex_intrin 		= dev.get_stream_intrinsics( tex_stream );
-	app_state.identical 		= app_state.depth_intrin == app_state.tex_intrin && app_state.extrin.is_identity( );
+	_app_state.depth_scale 		= _rs_camera.get_depth_scale( );
+	_app_state.extrin 			= _rs_camera.get_extrinsics( rs::stream::depth, tex_stream );
+	_app_state.depth_intrin 	= _rs_camera.get_stream_intrinsics( rs::stream::depth );
+	_app_state.tex_intrin 		= _rs_camera.get_stream_intrinsics( tex_stream );
+	_app_state.identical 		= _app_state.depth_intrin == _app_state.tex_intrin && _app_state.extrin.is_identity( );
+}
 
-	// setup the OpenCV Mat structures
-	cv::Mat depth16( app_state.depth_intrin.height, app_state.depth_intrin.width, CV_16U,
-										(uchar *)dev.get_frame_data( rs::stream::depth ) );
 
-	rs::intrinsics 	color_intrin = dev.get_stream_intrinsics( rs::stream::color );
-	cv::Mat 		rgb( color_intrin.height, color_intrin.width, CV_8UC3, (uchar *)dev.get_frame_data( rs::stream::color ) );
+
+/////////////////////////////////////////////////////////////////////////////
+// Called every frame gets the data from streams and displays them using OpenCV.
+/////////////////////////////////////////////////////////////////////////////
+bool display_next_frame( )
+{
+	_color_intrin = _rs_camera.get_stream_intrinsics( rs::stream::color );
+
+
+	// Create depth image
+	cv::Mat depth16( _app_state.depth_intrin.height,
+					 _app_state.depth_intrin.width,
+					 CV_16U,
+					 (uchar *)_rs_camera.get_frame_data( rs::stream::depth ) );
+
+	// Create color image
+	cv::Mat rgb( _color_intrin.height,
+				 _color_intrin.width,
+				 CV_8UC3,
+				 (uchar *)_rs_camera.get_frame_data( rs::stream::color ) );
 
 	cv::Mat depth8u = depth16;// < 800;
 
 	depth8u.convertTo( depth8u, CV_8UC1, 255.0/1000 );
 
-	imshow( "depth8u", depth8u );
+	imshow( WINDOW_DEPTH, depth8u );
 	cvWaitKey( 1 );
 
 	cv::cvtColor( rgb, rgb, cv::COLOR_BGR2RGB );
-	imshow( "rgb", rgb );
+	imshow( WINDOW_RGB, rgb );
 	cvWaitKey( 1 );
 
 	return true;
 }
 
 
+/////////////////////////////////////////////////////////////////////////////
+// If the left mouse button was clicked on either image, stop streaming and close windows.
+/////////////////////////////////////////////////////////////////////////////
+static void onMouse( int event, int x, int y, int, void* window_name )
+{
+	if( event == cv::EVENT_LBUTTONDOWN )
+	{
+		_loop = false;
+	}
+}
 
 
-//int main( int argc, char * argv[] ) try
+/////////////////////////////////////////////////////////////////////////////
+// Create the depth and RGB windows, set their mouse callbacks.
+// Required if we want to create a window and have the ability to use it in
+// different functions
+/////////////////////////////////////////////////////////////////////////////
+void setup_windows( )
+{
+	cv::namedWindow( WINDOW_DEPTH, 0 );
+	cv::namedWindow( WINDOW_RGB, 0 );
+
+	cv::setMouseCallback( WINDOW_DEPTH, onMouse, WINDOW_DEPTH );
+	cv::setMouseCallback( WINDOW_RGB, onMouse, WINDOW_RGB );
+}
+
+
+/////////////////////////////////////////////////////////////////////////////
+// Main function
+/////////////////////////////////////////////////////////////////////////////
 int main( ) try
 {
 	rs::log_to_console( rs::log_severity::warn );
 
 	state *app_state = initialize_app_state( );
+	setup_windows( );
 
-	if (app_state == 0)
+	if( app_state == 0)
 	{
 		std::cout << "Unable to locate a camera" << std::endl;
 		rs::log_to_console( rs::log_severity::fatal );
 		return EXIT_FAILURE;
 	}
 
-	while( true )
+
+	while( _loop )
 	{
-		app_next_frame( );//(handPoint.x, handPoint.y, z);
+		if( _rs_camera.is_streaming( ) )
+			_rs_camera.wait_for_frames( );
+
+		get_next_frame( );
+		display_next_frame( );
 	}
+
+	_rs_camera.stop( );
+	cv::destroyAllWindows( );
+
 
 	return EXIT_SUCCESS;
 
