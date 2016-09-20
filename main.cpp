@@ -1,5 +1,26 @@
+/////////////////////////////////////////////////////////////////////////////
 // License: Apache 2.0. See LICENSE file in root directory.
 // Copyright(c) 2016 Intel Corporation. All Rights Reserved.
+//
+//
+//
+/////////////////////////////////////////////////////////////////////////////
+// Authors
+// * Rudy Cazabon
+// * Rick Blacker
+//
+// Dependencies
+// * LibRealSense
+// * OpenCV
+//
+/////////////////////////////////////////////////////////////////////////////
+// This code sample shows how you can use LibRealSense and OpenCV to display
+// both an RGB stream as well as Depth stream into two separate OpenCV
+// created windows.
+//
+/////////////////////////////////////////////////////////////////////////////
+
+
 #include <vector>
 #include <librealsense/rs.hpp>
 #include <opencv2/opencv.hpp>
@@ -9,7 +30,8 @@ using namespace std;
 
 
 /////////////////////////////////////////////////////////////////////////////
-// Contains basic information needed to display rgb and depth data to a window.
+// Contains basic information needed to display rgb and depth data to a
+// window.
 /////////////////////////////////////////////////////////////////////////////
 struct state
 {
@@ -17,8 +39,7 @@ struct state
 	float depth_scale;
 	rs::extrinsics extrin;
 	rs::intrinsics depth_intrin;
-	rs::intrinsics tex_intrin;
-	bool identical;
+	rs::intrinsics color_intrin;
 	int index;
 };
 
@@ -38,13 +59,11 @@ char* const WINDOW_DEPTH = "Depth Image";
 char* const WINDOW_RGB	 = "RGB Image";
 
 
-
 static rs::context 	_ctx;
 static state 		_app_state;
 bool 				_loop = true;
 
 rs::device& 		_rs_camera = *_ctx.get_device( 0 );
-rs::intrinsics 		_color_intrin;
 
 
 // Initialize the application state. Upon success will return the static app_state vars address
@@ -62,8 +81,7 @@ state *initialize_app_state( )
 		initState.depth_scale	= _rs_camera.get_depth_scale( );
 		initState.extrin		= _rs_camera.get_extrinsics( rs::stream::depth, rs::stream::color );
 		initState.depth_intrin	= _rs_camera.get_stream_intrinsics( rs::stream::depth );
-		initState.tex_intrin	= _rs_camera.get_stream_intrinsics( rs::stream::depth );
-		initState.identical		= false;
+		initState.color_intrin	= _rs_camera.get_stream_intrinsics( rs::stream::color );
 		initState.index			= STREAM_COLOR;
 
 		_app_state = initState;
@@ -84,8 +102,7 @@ void get_next_frame( )
 	_app_state.depth_scale 		= _rs_camera.get_depth_scale( );
 	_app_state.extrin 			= _rs_camera.get_extrinsics( rs::stream::depth, tex_stream );
 	_app_state.depth_intrin 	= _rs_camera.get_stream_intrinsics( rs::stream::depth );
-	_app_state.tex_intrin 		= _rs_camera.get_stream_intrinsics( tex_stream );
-	_app_state.identical 		= _app_state.depth_intrin == _app_state.tex_intrin && _app_state.extrin.is_identity( );
+	_app_state.color_intrin 	= _rs_camera.get_stream_intrinsics( rs::stream::color );
 }
 
 
@@ -95,8 +112,6 @@ void get_next_frame( )
 /////////////////////////////////////////////////////////////////////////////
 bool display_next_frame( )
 {
-	_color_intrin = _rs_camera.get_stream_intrinsics( rs::stream::color );
-
 
 	// Create depth image
 	cv::Mat depth16( _app_state.depth_intrin.height,
@@ -105,15 +120,16 @@ bool display_next_frame( )
 					 (uchar *)_rs_camera.get_frame_data( rs::stream::depth ) );
 
 	// Create color image
-	cv::Mat rgb( _color_intrin.height,
-				 _color_intrin.width,
+	cv::Mat rgb( _app_state.color_intrin.height,
+				 _app_state.color_intrin.width,
 				 CV_8UC3,
 				 (uchar *)_rs_camera.get_frame_data( rs::stream::color ) );
 
-	cv::Mat depth8u = depth16;// < 800;
+	// < 800
+	cv::Mat depth8u = depth16;
+
 
 	depth8u.convertTo( depth8u, CV_8UC1, 255.0/1000 );
-
 	imshow( WINDOW_DEPTH, depth8u );
 	cvWaitKey( 1 );
 
@@ -170,6 +186,7 @@ int main( ) try
 	}
 
 
+	// Loop until someone left clicks on either of the images in either window.
 	while( _loop )
 	{
 		if( _rs_camera.is_streaming( ) )
