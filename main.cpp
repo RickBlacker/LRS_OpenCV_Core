@@ -39,7 +39,6 @@ char* const WINDOW_RGB	 = "RGB Image";
 
 
 context 	_rs_ctx;
-//device& 	_rs_camera = *_rs_ctx.get_device( 0 );
 device* 	_rs_camera = NULL;
 intrinsics 	_depth_intrin;
 intrinsics  _color_intrin;
