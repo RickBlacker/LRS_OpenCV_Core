@@ -34,8 +34,9 @@ int const INPUT_HEIGHT 	= 240;
 int const FRAMERATE 	= 60;
 
 // Named windows
-char* const WINDOW_DEPTH = "Depth Image";
-char* const WINDOW_RGB	 = "RGB Image";
+string depth = "Depth Image", rgb = "RGB Image";
+char* const WINDOW_DEPTH = strdup(depth.c_str());
+char* const WINDOW_RGB	 = strdup(rgb.c_str());
 
 
 context 	_rs_ctx;
